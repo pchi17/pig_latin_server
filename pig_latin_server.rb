@@ -1,14 +1,10 @@
 require 'socket'
 require 'net/http'
 require 'nokogiri'
+require_relative 'my_string'
+require 'pry'
 
 server = TCPServer.new(8080)
-
-def translate_to_pig_latin(sentence)
-  encoded_sentence = sentence.encode("UTF-16be", invalid: :replace, replace: '?').encode('UTF-8')
-  return '' if encoded_sentence.nil?
-  encoded_sentence.split(' ').map { |word| word[1..-1] + word[0] + 'ay' }.join(' ')
-end
 
 loop do
   client = server.accept
@@ -17,30 +13,33 @@ loop do
   path = request.split('?').first.split(' ').last
   params_string = request.split('?').last.split(' ').first
   
-  params = params_string.split('&').map { |str| 
-    str.split('=') 
-  }.select { |arr| 
-    arr.length == 2 
-  }.to_h
+  params = params_string.split('&')
+    .map { |str| str.split('=') }
+    .select { |arr| arr.length == 2 }
+    .to_h
   
   host = params['host']
   
   if host.nil?
-    client.puts ''
+    client.puts 'Host must be in the query string!'
   else
-    uri = URI.join('http://' + host, path)
+    uri = URI.parse(host)
+    if uri.scheme.nil?
+      uri.scheme = 'http'
+      uri.host = uri.path
+      uri.path = ''  
+    end
+    uri = URI.join(uri.to_s, path)
+    
     request  = Net::HTTP::Get.new(uri.request_uri)
     response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
-    nok = Nokogiri::HTML(response.body)
+    doc = Nokogiri::HTML(response.body)
     
-    nok.css('*').each do |element|
-      element.children.each do |child|
-        next if child.name != 'text'
-        child.content = translate_to_pig_latin(child.text)
-      end
+    doc.search('//text()').select { |node| node.name == 'text' }.each do |element|
+      element.content = MyString.new(element.text).to_pig_latin
     end
-    
-    client.puts nok.to_html
+        
+    client.puts doc.to_html
   end
   client.close
 end
